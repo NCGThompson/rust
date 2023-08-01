@@ -912,6 +912,7 @@ symbols! {
         io_stderr,
         io_stdout,
         irrefutable_let_patterns,
+        is_constant,
         isa_attribute,
         isize,
         issue,
