@@ -912,7 +912,7 @@ symbols! {
         io_stderr,
         io_stdout,
         irrefutable_let_patterns,
-        is_constant,
+        is_compile_time_known,
         isa_attribute,
         isize,
         issue,
