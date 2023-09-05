@@ -2536,7 +2536,8 @@ extern "rust-intrinsic" {
 // and thus compiling stage0 core doesn't work.
 #[rustc_const_stable(feature = "is_val_statically_known", since = "never")]
 #[cfg(bootstrap)]
-pub const unsafe fn is_val_statically_known<T: ~const crate::marker::Destruct>(_: T) -> bool {
+pub const unsafe fn is_val_statically_known<T>(t: T) -> bool {
+    mem::forget(t);
     false
 }
 
