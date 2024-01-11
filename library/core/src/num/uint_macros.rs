@@ -1005,28 +1005,39 @@ macro_rules! uint_impl {
         #[rustc_const_stable(feature = "const_int_pow", since = "1.50.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
+        #[rustc_allow_const_fn_unstable(is_val_statically_known)]
         #[inline]
         pub const fn checked_pow(self, mut exp: u32) -> Option<Self> {
-            if exp == 0 {
-                return Some(1);
-            }
-            let mut base = self;
-            let mut acc: Self = 1;
-
-            while exp > 1 {
-                if (exp & 1) == 1 {
-                    acc = try_opt!(acc.checked_mul(base));
+            // SAFETY: This path has the same behavior as the other.
+            if unsafe { intrinsics::is_val_statically_known(self) }
+                && self.is_power_of_two()
+            {
+                // SAFETY: We just checked this is a power of two. and above zero.
+                let power_used = unsafe { intrinsics::cttz_nonzero(self) as u32 };
+                let num_shl = power_used.saturating_mul(exp);
+                (1 as Self).checked_shl(num_shl)
+            } else {
+                if exp == 0 {
+                    return Some(1);
                 }
-                exp /= 2;
-                base = try_opt!(base.checked_mul(base));
+                let mut base = self;
+                let mut acc: Self = 1;
+
+                while exp > 1 {
+                    if (exp & 1) == 1 {
+                        acc = try_opt!(acc.checked_mul(base));
+                    }
+                    exp /= 2;
+                    base = try_opt!(base.checked_mul(base));
+                }
+
+                // since exp!=0, finally the exp must be 1.
+                // Deal with the final bit of the exponent separately, since
+                // squaring the base afterwards is not necessary and may cause a
+                // needless overflow.
+
+                acc.checked_mul(base)
             }
-
-            // since exp!=0, finally the exp must be 1.
-            // Deal with the final bit of the exponent separately, since
-            // squaring the base afterwards is not necessary and may cause a
-            // needless overflow.
-
-            acc.checked_mul(base)
         }
 
         /// Saturating integer addition. Computes `self + rhs`, saturating at
@@ -1475,27 +1486,42 @@ macro_rules! uint_impl {
         #[rustc_const_stable(feature = "const_int_pow", since = "1.50.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
+        #[rustc_allow_const_fn_unstable(is_val_statically_known)]
         #[inline]
         pub const fn wrapping_pow(self, mut exp: u32) -> Self {
-            if exp == 0 {
-                return 1;
-            }
-            let mut base = self;
-            let mut acc: Self = 1;
+            // SAFETY: This path has the same behavior as the other.
+            if unsafe { intrinsics::is_val_statically_known(self) }
+                && self.is_power_of_two()
+            {
+                // SAFETY: We just checked this is a power of two. and above zero.
+                let power_used = unsafe { intrinsics::cttz_nonzero(self) as u32 };
+                let num_shl = power_used.saturating_mul(exp);
 
-            while exp > 1 {
-                if (exp & 1) == 1 {
-                    acc = acc.wrapping_mul(base);
+                match (1 as Self).checked_shl(num_shl) {
+                    Some(x) => x,
+                    None => 0
                 }
-                exp /= 2;
-                base = base.wrapping_mul(base);
-            }
+            } else {
+                if exp == 0 {
+                    return 1;
+                }
+                let mut base = self;
+                let mut acc: Self = 1;
 
-            // since exp!=0, finally the exp must be 1.
-            // Deal with the final bit of the exponent separately, since
-            // squaring the base afterwards is not necessary and may cause a
-            // needless overflow.
-            acc.wrapping_mul(base)
+                while exp > 1 {
+                    if (exp & 1) == 1 {
+                        acc = acc.wrapping_mul(base);
+                    }
+                    exp /= 2;
+                    base = base.wrapping_mul(base);
+                }
+
+                // since exp!=0, finally the exp must be 1.
+                // Deal with the final bit of the exponent separately, since
+                // squaring the base afterwards is not necessary and may cause a
+                // needless overflow.
+                acc.wrapping_mul(base)
+            }
         }
 
         /// Calculates `self` + `rhs`
@@ -1925,37 +1951,52 @@ macro_rules! uint_impl {
         #[rustc_const_stable(feature = "const_int_pow", since = "1.50.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
+        #[rustc_allow_const_fn_unstable(is_val_statically_known)]
         #[inline]
         pub const fn overflowing_pow(self, mut exp: u32) -> (Self, bool) {
-            if exp == 0{
-                return (1,false);
-            }
-            let mut base = self;
-            let mut acc: Self = 1;
-            let mut overflown = false;
-            // Scratch space for storing results of overflowing_mul.
-            let mut r;
+            // SAFETY: This path has the same behavior as the other.
+            if unsafe { intrinsics::is_val_statically_known(self) }
+                && self.is_power_of_two()
+            {
+                // SAFETY: We just checked this is a power of two. and above zero.
+                let power_used = unsafe { intrinsics::cttz_nonzero(self) as u32 };
+                let num_shl = power_used.saturating_mul(exp);
 
-            while exp > 1 {
-                if (exp & 1) == 1 {
-                    r = acc.overflowing_mul(base);
-                    acc = r.0;
+                match (1 as Self).checked_shl(num_shl) {
+                    Some(x) => (x, false),
+                    None => (0, true)
+                }
+            } else {
+                if exp == 0{
+                    return (1,false);
+                }
+                let mut base = self;
+                let mut acc: Self = 1;
+                let mut overflown = false;
+                // Scratch space for storing results of overflowing_mul.
+                let mut r;
+
+                while exp > 1 {
+                    if (exp & 1) == 1 {
+                        r = acc.overflowing_mul(base);
+                        acc = r.0;
+                        overflown |= r.1;
+                    }
+                    exp /= 2;
+                    r = base.overflowing_mul(base);
+                    base = r.0;
                     overflown |= r.1;
                 }
-                exp /= 2;
-                r = base.overflowing_mul(base);
-                base = r.0;
-                overflown |= r.1;
+
+                // since exp!=0, finally the exp must be 1.
+                // Deal with the final bit of the exponent separately, since
+                // squaring the base afterwards is not necessary and may cause a
+                // needless overflow.
+                r = acc.overflowing_mul(base);
+                r.1 |= overflown;
+
+                r
             }
-
-            // since exp!=0, finally the exp must be 1.
-            // Deal with the final bit of the exponent separately, since
-            // squaring the base afterwards is not necessary and may cause a
-            // needless overflow.
-            r = acc.overflowing_mul(base);
-            r.1 |= overflown;
-
-            r
         }
 
         /// Raises self to the power of `exp`, using exponentiation by squaring.
@@ -1971,10 +2012,10 @@ macro_rules! uint_impl {
         #[rustc_const_stable(feature = "const_int_pow", since = "1.50.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
+        #[rustc_allow_const_fn_unstable(is_val_statically_known)]
         #[inline]
         #[rustc_inherit_overflow_checks]
         #[track_caller] // Hides the hackish overflow check for powers of two.
-        #[rustc_allow_const_fn_unstable(is_val_statically_known)]
         pub const fn pow(self, mut exp: u32) -> Self {
             // LLVM now knows that `self` is a constant value, but not a
             // constant in Rust. This allows us to compute the power used at
@@ -1994,7 +2035,7 @@ macro_rules! uint_impl {
                 // SAFETY: We just checked this is a power of two. and above zero.
                 let power_used = unsafe { intrinsics::cttz_nonzero(self) as u32 };
                 let num_shl = power_used.saturating_mul(exp);
-                
+
                 #[allow(arithmetic_overflow)]
                 match (1 as Self).checked_shl(num_shl) {
                     Some(x) => x,
