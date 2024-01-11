@@ -2088,6 +2088,7 @@ macro_rules! int_impl {
                       without modifying the original"]
         #[inline]
         #[rustc_inherit_overflow_checks]
+        #[track_caller] // Hides the hackish overflow check for powers of two.
         #[rustc_allow_const_fn_unstable(is_val_statically_known)]
         pub const fn pow(self, mut exp: u32) -> Self {
             // SAFETY: This path has the same behavior as the other.
@@ -2095,21 +2096,20 @@ macro_rules! int_impl {
                 && self > 0
                 && (self & (self - 1) == 0)
             {
-                let power_used = match self.checked_ilog2() {
-                    Some(v) => v,
-                    // SAFETY: We just checked this is a power of two. and above zero.
-                    None => unsafe { core::hint::unreachable_unchecked() },
+                // SAFETY: We just checked this is a power of two. and above zero.
+                let power_used = unsafe { intrinsics::cttz_nonzero(self) as u32 };
+                let num_shl = power_used.saturating_mul(exp);
+                let res = match (1 as Self).checked_shl(num_shl) {
+                    Some(x) => x,
+                    None => 0
                 };
-                // So it panics. Have to use `overflowing_mul` to efficiently set the
-                // result to 0 if not.
-                #[cfg(debug_assertions)]
-                {
-                    _ = power_used * exp;
+
+                #[allow(arithmetic_overflow)]
+                if res <= 0 {
+                    // So it panics.
+                    _ = Self::MAX * Self::MAX;
                 }
-                let (num_shl, overflowed) = power_used.overflowing_mul(exp);
-                let fine = !overflowed
-                    & (num_shl < (mem::size_of::<Self>() * 8) as u32);
-                (1 << num_shl) * fine as Self
+                res
             } else {
                 if exp == 0 {
                     return 1;
