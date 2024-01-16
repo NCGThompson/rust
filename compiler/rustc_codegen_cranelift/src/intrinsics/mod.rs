@@ -439,6 +439,13 @@ fn codegen_regular_intrinsic_call<'tcx>(
 
             ret.write_cvalue(fx, a);
         }
+        sym::is_val_statically_known => {
+            intrinsic_args!(fx, args => (_a); intrinsic);
+
+            // FIXME impliment intrinsic or guarantee propogation of false
+            let res = fx.bcx.ins().iconst(cranelift_codegen::ir::types::I8, false as i64);
+            ret.write_cvalue(fx, CValue::by_val(res, ret.layout()));
+        }
         sym::breakpoint => {
             intrinsic_args!(fx, args => (); intrinsic);
 
