@@ -1005,17 +1005,27 @@ macro_rules! uint_impl {
         #[rustc_const_stable(feature = "const_int_pow", since = "1.50.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
-        #[rustc_allow_const_fn_unstable(is_val_statically_known)]
+        #[rustc_allow_const_fn_unstable(is_val_statically_known, const_int_unchecked_arith)]
         #[inline]
         pub const fn checked_pow(self, mut exp: u32) -> Option<Self> {
             // SAFETY: This path has the same behavior as the other.
             if unsafe { intrinsics::is_val_statically_known(self) }
                 && self.is_power_of_two()
             {
+                if self == 1 { // Avoid divide by zero
+                    return Some(1);
+                }
                 // SAFETY: We just checked this is a power of two. and above zero.
                 let power_used = unsafe { intrinsics::cttz_nonzero(self) as u32 };
-                let num_shl = power_used.saturating_mul(exp);
-                (1 as Self).checked_shl(num_shl)
+                if exp > Self::BITS / power_used { return None; } // Division of constants is free
+
+                // SAFETY: exp <= Self::BITS / power_used
+                unsafe { Some(intrinsics::unchecked_shl(
+                    1 as Self,
+                    intrinsics::unchecked_mul(power_used, exp) as Self
+                )) }
+                // LLVM doesn't always optimize out the checks
+                // at the ir level.
             } else {
                 if exp == 0 {
                     return Some(1);
@@ -1486,21 +1496,27 @@ macro_rules! uint_impl {
         #[rustc_const_stable(feature = "const_int_pow", since = "1.50.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
-        #[rustc_allow_const_fn_unstable(is_val_statically_known)]
+        #[rustc_allow_const_fn_unstable(is_val_statically_known, const_int_unchecked_arith)]
         #[inline]
         pub const fn wrapping_pow(self, mut exp: u32) -> Self {
             // SAFETY: This path has the same behavior as the other.
             if unsafe { intrinsics::is_val_statically_known(self) }
                 && self.is_power_of_two()
             {
+                if self == 1 { // Avoid divide by zero
+                    return 1;
+                }
                 // SAFETY: We just checked this is a power of two. and above zero.
                 let power_used = unsafe { intrinsics::cttz_nonzero(self) as u32 };
-                let num_shl = power_used.saturating_mul(exp);
+                if exp > Self::BITS / power_used {  return 0; } // Division of constants is free
 
-                match (1 as Self).checked_shl(num_shl) {
-                    Some(x) => x,
-                    None => 0
-                }
+                // SAFETY: exp <= Self::BITS / power_used
+                unsafe { intrinsics::unchecked_shl(
+                    1 as Self,
+                    intrinsics::unchecked_mul(power_used, exp) as Self
+                )}
+                // LLVM doesn't always optimize out the checks
+                // at the ir level.
             } else {
                 if exp == 0 {
                     return 1;
@@ -1951,21 +1967,27 @@ macro_rules! uint_impl {
         #[rustc_const_stable(feature = "const_int_pow", since = "1.50.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
-        #[rustc_allow_const_fn_unstable(is_val_statically_known)]
+        #[rustc_allow_const_fn_unstable(is_val_statically_known, const_int_unchecked_arith)]
         #[inline]
         pub const fn overflowing_pow(self, mut exp: u32) -> (Self, bool) {
             // SAFETY: This path has the same behavior as the other.
             if unsafe { intrinsics::is_val_statically_known(self) }
                 && self.is_power_of_two()
             {
+                if self == 1 { // Avoid divide by zero
+                    return (1, false);
+                }
                 // SAFETY: We just checked this is a power of two. and above zero.
                 let power_used = unsafe { intrinsics::cttz_nonzero(self) as u32 };
-                let num_shl = power_used.saturating_mul(exp);
+                if exp > Self::BITS / power_used {  return (0, true); } // Division of constants is free
 
-                match (1 as Self).checked_shl(num_shl) {
-                    Some(x) => (x, false),
-                    None => (0, true)
-                }
+                // SAFETY: exp <= Self::BITS / power_used
+                unsafe { (intrinsics::unchecked_shl(
+                    1 as Self,
+                    intrinsics::unchecked_mul(power_used, exp) as Self
+                ), false) }
+                // LLVM doesn't always optimize out the checks
+                // at the ir level.
             } else {
                 if exp == 0{
                     return (1,false);
@@ -2012,7 +2034,7 @@ macro_rules! uint_impl {
         #[rustc_const_stable(feature = "const_int_pow", since = "1.50.0")]
         #[must_use = "this returns the result of the operation, \
                       without modifying the original"]
-        #[rustc_allow_const_fn_unstable(is_val_statically_known)]
+        #[rustc_allow_const_fn_unstable(is_val_statically_known, const_int_unchecked_arith)]
         #[inline]
         #[rustc_inherit_overflow_checks]
         #[track_caller] // Hides the hackish overflow check for powers of two.
@@ -2032,15 +2054,23 @@ macro_rules! uint_impl {
             if unsafe { intrinsics::is_val_statically_known(self) }
                 && self.is_power_of_two()
             {
+                if self == 1 { // Avoid divide by zero
+                    return 1;
+                }
                 // SAFETY: We just checked this is a power of two. and above zero.
                 let power_used = unsafe { intrinsics::cttz_nonzero(self) as u32 };
-                let num_shl = power_used.saturating_mul(exp);
-
-                #[allow(arithmetic_overflow)]
-                match (1 as Self).checked_shl(num_shl) {
-                    Some(x) => x,
-                    None => Self::MAX * Self::MAX * 0
+                if exp > Self::BITS / power_used { // Division of constants is free
+                    #[allow(arithmetic_overflow)]
+                    return Self::MAX * Self::MAX * 0;
                 }
+
+                // SAFETY: exp <= Self::BITS / power_used
+                unsafe { intrinsics::unchecked_shl(
+                    1 as Self,
+                    intrinsics::unchecked_mul(power_used, exp) as Self
+                )}
+                // LLVM doesn't always optimize out the checks
+                // at the ir level.
             } else {
                 if exp == 0 {
                     return 1;
